@@ -2,15 +2,23 @@ import { NextRequest, NextResponse } from "next/server"
 import OpenAI from "openai"
 import { buildCardPrompt, validateCardParams, CardParams } from "@/lib/prompt-builder"
 
+// Extend Vercel function timeout to 120s (gpt-image-1 takes ~50s)
+export const config = {
+  api: {
+    responseLimit: false,
+  },
+  maxDuration: 120,
+}
+
 function getOpenAI() {
   return new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 }
 
 // Rate limit config
-const MAX_FREE_GENERATIONS = 3
+const MAX_FREE_GENERATIONS = 10
 const WINDOW_MS = 24 * 60 * 60 * 1000 // 24h
 
-// In-memory store (works for dev, use Redis/Supabase in prod)
+// In-memory store (works for single-instance; use Redis in prod for multi-instance)
 const rateLimitStore = new Map<string, { count: number; resetAt: number }>()
 
 function getClientId(req: NextRequest): string {
@@ -62,7 +70,7 @@ export async function POST(req: NextRequest) {
 
     if (!allowed) {
       return NextResponse.json(
-        { error: "Rate limit exceeded. Free generations used up.", code: "RATE_LIMIT_EXCEEDED", remaining: 0 },
+        { error: "Rate limit exceeded. Try again later.", code: "RATE_LIMIT_EXCEEDED", remaining: 0 },
         { status: 429 }
       )
     }
@@ -70,20 +78,23 @@ export async function POST(req: NextRequest) {
     // Build prompt SERVER-SIDE
     const prompt = buildCardPrompt(body)
 
-    // Call OpenAI
+    // Call OpenAI — request URL format so we return a direct image link (no base64)
     const openai = getOpenAI()
     const response = await openai.images.generate({
       model: "gpt-image-1",
       prompt,
       size: "1024x1536",
       quality: "medium",
-    })
+      response_format: "url",
+    } as any) // response_format may not be in the TS types for gpt-image-1 yet
 
     if (!response.data || response.data.length === 0) {
       throw new Error("No image returned from OpenAI")
     }
 
     const imageData = response.data[0]
+
+    // Prefer URL (from response_format: "url"), fall back to base64 data URL
     const imageUrl = imageData.url || (imageData.b64_json ? `data:image/png;base64,${imageData.b64_json}` : null)
 
     if (!imageUrl) {
@@ -94,7 +105,6 @@ export async function POST(req: NextRequest) {
       success: true,
       imageUrl,
       remaining,
-      revisedPrompt: imageData.revised_prompt || null,
     })
 
   } catch (err: any) {
@@ -119,7 +129,7 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json(
-      { error: "Card generation failed", code: "INTERNAL_ERROR" },
+      { error: "Card generation failed", code: "INTERNAL_ERROR", details: err?.message || err?.error?.message || "Unknown" },
       { status: 500 }
     )
   }
