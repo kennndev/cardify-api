@@ -18,7 +18,7 @@ function getOpenAI() {
 const MAX_FREE_GENERATIONS = 10
 const WINDOW_MS = 24 * 60 * 60 * 1000 // 24h
 
-// In-memory store (works for single-instance; use Redis in prod for multi-instance)
+// In-memory store
 const rateLimitStore = new Map<string, { count: number; resetAt: number }>()
 
 function getClientId(req: NextRequest): string {
@@ -78,15 +78,14 @@ export async function POST(req: NextRequest) {
     // Build prompt SERVER-SIDE
     const prompt = buildCardPrompt(body)
 
-    // Call OpenAI — request URL format so we return a direct image link (no base64)
+    // Call OpenAI
     const openai = getOpenAI()
     const response = await openai.images.generate({
       model: "gpt-image-1",
       prompt,
       size: "1024x1536",
       quality: "medium",
-      response_format: "url",
-    } as any) // response_format may not be in the TS types for gpt-image-1 yet
+    })
 
     if (!response.data || response.data.length === 0) {
       throw new Error("No image returned from OpenAI")
@@ -94,21 +93,44 @@ export async function POST(req: NextRequest) {
 
     const imageData = response.data[0]
 
-    // Prefer URL (from response_format: "url"), fall back to base64 data URL
-    const imageUrl = imageData.url || (imageData.b64_json ? `data:image/png;base64,${imageData.b64_json}` : null)
+    // Check what the client wants: JSON (with data URL) or raw image
+    const acceptHeader = req.headers.get("accept") || ""
 
-    if (!imageUrl) {
-      throw new Error("No image URL or base64 in response")
+    if (imageData.b64_json) {
+      // If client wants raw image (default for curl/agents) → return PNG binary
+      if (!acceptHeader.includes("application/json")) {
+        const imageBuffer = Buffer.from(imageData.b64_json, "base64")
+        return new NextResponse(imageBuffer, {
+          status: 200,
+          headers: {
+            "Content-Type": "image/png",
+            "Content-Disposition": "attachment; filename=card.png",
+            "X-Remaining": String(remaining),
+            "Access-Control-Expose-Headers": "X-Remaining",
+          },
+        })
+      }
+
+      // If client explicitly wants JSON → return data URL
+      return NextResponse.json({
+        success: true,
+        imageUrl: `data:image/png;base64,${imageData.b64_json}`,
+        remaining,
+      })
     }
 
-    return NextResponse.json({
-      success: true,
-      imageUrl,
-      remaining,
-    })
+    // If OpenAI returned a URL directly
+    if (imageData.url) {
+      return NextResponse.json({
+        success: true,
+        imageUrl: imageData.url,
+        remaining,
+      })
+    }
+
+    throw new Error("No image data in response")
 
   } catch (err: any) {
-    // OpenAI specific errors
     if (err?.error?.code === "content_policy_violation") {
       return NextResponse.json(
         { error: "Prompt flagged by content policy. Try a different description.", code: "CONTENT_POLICY" },
