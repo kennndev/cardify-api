@@ -64,16 +64,62 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Rate limit check
-    const clientId = getClientId(req)
-    const { allowed, remaining } = checkRateLimit(clientId)
+    // Credit check + deduct (200 credits per image)
+    const CREDITS_PER_IMAGE = 200
+    const CREDIT_ENDPOINT = process.env.CREDIT_ENDPOINT_URL || "https://credit-endpoint.vercel.app"
+    
+    const deductResponse = await fetch(`${CREDIT_ENDPOINT}/api/credits/deduct`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        platform: body.platform,
+        external_user_id: body.external_user_id,
+        amount: CREDITS_PER_IMAGE,
+        reason: "card_generation",
+        reference_id: `card_${Date.now()}_${body.external_user_id}`,
+      }),
+    })
 
-    if (!allowed) {
+    if (!deductResponse.ok) {
+      const deductError = await deductResponse.json().catch(() => ({}))
+      
+      if (deductResponse.status === 402) {
+        // Insufficient credits
+        return NextResponse.json(
+          {
+            error: "Insufficient credits",
+            code: "INSUFFICIENT_CREDITS",
+            balance: deductError.balance || 0,
+            required: CREDITS_PER_IMAGE,
+            message: `You need ${CREDITS_PER_IMAGE} credits to generate a card. Current balance: ${deductError.balance || 0}`,
+          },
+          { status: 402 }
+        )
+      }
+      
+      if (deductResponse.status === 404) {
+        // Account not found
+        return NextResponse.json(
+          {
+            error: "Account not found. Please purchase credits first.",
+            code: "ACCOUNT_NOT_FOUND",
+          },
+          { status: 404 }
+        )
+      }
+      
+      // Other errors
       return NextResponse.json(
-        { error: "Rate limit exceeded. Try again later.", code: "RATE_LIMIT_EXCEEDED", remaining: 0 },
-        { status: 429 }
+        {
+          error: deductError.error || "Credit system error",
+          code: "CREDIT_ERROR",
+        },
+        { status: 500 }
       )
     }
+
+    const deductData = await deductResponse.json()
+    const newBalance = deductData.balance || 0
 
     // Build prompt SERVER-SIDE
     const prompt = buildCardPrompt(body)
@@ -105,8 +151,9 @@ export async function POST(req: NextRequest) {
           headers: {
             "Content-Type": "image/png",
             "Content-Disposition": "attachment; filename=card.png",
-            "X-Remaining": String(remaining),
-            "Access-Control-Expose-Headers": "X-Remaining",
+            "X-Credits-Balance": String(newBalance),
+            "X-Credits-Deducted": String(CREDITS_PER_IMAGE),
+            "Access-Control-Expose-Headers": "X-Credits-Balance, X-Credits-Deducted",
           },
         })
       }
@@ -115,7 +162,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         success: true,
         imageUrl: `data:image/png;base64,${imageData.b64_json}`,
-        remaining,
+        credits: {
+          balance: newBalance,
+          deducted: CREDITS_PER_IMAGE,
+        },
       })
     }
 
@@ -124,7 +174,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         success: true,
         imageUrl: imageData.url,
-        remaining,
+        credits: {
+          balance: newBalance,
+          deducted: CREDITS_PER_IMAGE,
+        },
       })
     }
 

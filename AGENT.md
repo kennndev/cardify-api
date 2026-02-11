@@ -13,11 +13,34 @@ Generates a professional AI trading card image (1024x1536 PNG, card ratio 2.5:3.
 
 | Field | Required | Description |
 |---|---|---|
+| `platform` | ✅ Yes | Platform identifier (e.g., "discord") |
+| `external_user_id` | ✅ Yes | User ID on that platform (e.g., Discord user ID) |
 | `mainCharacter` | ✅ Yes | Who/what is on the card. Be descriptive — appearance, details, pose |
 | `background` | No | The scene/setting behind the character |
 | `frameStyle` | No | Card frame type — see styles below |
 | `titleText` | No | Name on the card (top of frame) |
 | `additionalText` | No | Subtitle, type, stats, flavor text etc |
+
+## Credits
+**Cost per image:** 200 credits
+
+Users must have sufficient credits before generating. If balance is insufficient, the API returns a `402` error with current balance and required amount.
+
+To check balance:
+```
+GET https://credit-endpoint.vercel.app/api/credits/balance?platform=discord&external_user_id=123456789
+```
+
+To purchase credits:
+```
+POST https://credit-endpoint.vercel.app/api/credits/checkout
+{
+  "platform": "discord",
+  "external_user_id": "123456789",
+  "usd": 25
+}
+```
+Returns a Stripe checkout URL. $1 = 400 credits, minimum $10.
 
 ## Frame Styles
 
@@ -47,6 +70,8 @@ If you need JSON instead, add `Accept: application/json` header — returns `{ s
 ### A Pokémon-style creature card
 ```json
 {
+  "platform": "discord",
+  "external_user_id": "123456789012345678",
   "mainCharacter": "a massive serpentine dragon made of liquid fire, coiled and ready to strike",
   "background": "a volcanic island surrounded by a stormy ocean at sunset",
   "frameStyle": "pokemon",
@@ -58,6 +83,8 @@ If you need JSON instead, add `Accept: application/json` header — returns `{ s
 ### A Magic: The Gathering spell card
 ```json
 {
+  "platform": "discord",
+  "external_user_id": "123456789012345678",
   "mainCharacter": "an ancient wizard casting a massive portal of light, robes flowing with arcane energy",
   "background": "a dark mystical forest with glowing runes floating in the air",
   "frameStyle": "magic",
@@ -69,6 +96,8 @@ If you need JSON instead, add `Accept: application/json` header — returns `{ s
 ### A cyberpunk warrior
 ```json
 {
+  "platform": "discord",
+  "external_user_id": "123456789012345678",
   "mainCharacter": "a chrome-plated street samurai with holographic tattoos and a glowing katana",
   "background": "rain-soaked neon-lit alleyway with flickering ads and smoke",
   "frameStyle": "cyberpunk",
@@ -80,6 +109,8 @@ If you need JSON instead, add `Accept: application/json` header — returns `{ s
 ### Pure art, no frame
 ```json
 {
+  "platform": "discord",
+  "external_user_id": "123456789012345678",
   "mainCharacter": "a majestic phoenix mid-rebirth, feathers dissolving into golden embers",
   "background": "an endless void with swirling galaxies and stars",
   "frameStyle": "none",
@@ -95,4 +126,5 @@ If you need JSON instead, add `Accept: application/json` header — returns `{ s
 
 ## Limits
 - ~50 seconds per card (AI generation time)
-- Rate limited to 10 cards per IP per 24 hours
+- **200 credits per card** — deducted before generation
+- Returns `402 Insufficient Credits` if balance is too low

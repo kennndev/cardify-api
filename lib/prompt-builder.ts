@@ -2,6 +2,11 @@
 // Prompts synced with cardify-imp FRAME_STYLES (source of truth)
 
 export interface CardParams {
+  // Credit system fields
+  platform: string
+  external_user_id: string
+  
+  // Card generation fields
   mainCharacter: string
   background?: string
   frameStyle?: "none" | "pokemon" | "magic" | "cyberpunk"
@@ -118,6 +123,12 @@ export function buildCardPrompt(params: CardParams): string {
 
 // Validation
 export function validateCardParams(params: CardParams): { valid: boolean; error?: string } {
+  if (!params.platform || params.platform.trim().length === 0) {
+    return { valid: false, error: "platform is required" }
+  }
+  if (!params.external_user_id || params.external_user_id.trim().length === 0) {
+    return { valid: false, error: "external_user_id is required" }
+  }
   if (!params.mainCharacter || params.mainCharacter.trim().length === 0) {
     return { valid: false, error: "mainCharacter is required" }
   }
